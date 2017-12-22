@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Index{% endblock %}
+{% block head %}
+    {{ super() }}
+{% endblock %}
+{% block content %}
+    <section class="features" id="features">
+      <div class="container">
+        <div class="section-heading text-center">
+          <h2>Let's Get Started</h2>
+          <p class="text-muted">Please click below to authorize HubSpot</p>
+            <div>
+                <img src="static/img/hubmetrix_to_hubspot_connection_logo.png" alt="">
+            </div>
+            <div>
+                <br/>
+                <a id="authorize" href="{{hs_auth_url}}" class="btn btn-outline active btn-xl">Authorize</a>
+            </div>
+          <hr>
+        </div>
+      </div>
+    </section>
+{% endblock %}
