@@ -1,4 +1,5 @@
 from bigcommerce.api import BigcommerceApi
+from bigcommerce.exception import ClientRequestException
 from flask import Flask, session, redirect, url_for, request, render_template, Response
 from hubspot_utils import *
 from dynamodb_utils import *
@@ -12,7 +13,8 @@ app = Flask(__name__)
 app.config['DEBUG'] = os.getenv('DEBUG', True)
 app.config['LISTEN_HOST'] = os.getenv('LISTEN_HOST', '0.0.0.0')
 app.config['LISTEN_PORT'] = int(os.getenv('LISTEN_PORT', '5000'))
-app.config['APP_URL'] = os.getenv('APP_URL', 'https://9kr5377xjf.execute-api.us-west-1.amazonaws.com')  # must be https to avoid browser issues
+app.config['APP_URL'] = os.getenv('APP_URL', 'https://9kr5377xjf.execute-api.us-west-1.amazonaws.com')
+app.config['APP_BACKEND_URL'] = os.getenv('APP_BACKEND_URL', 'https://abtggwksuh.execute-api.us-west-1.amazonaws.com')
 app.config['BC_CLIENT_ID'] = os.getenv('BC_CLIENT_ID', '5sdgtpwp82lxz5elfh5c5e2uvjzd07g')
 app.config['BC_CLIENT_SECRET'] = os.getenv('BC_CLIENT_SECRET', 'rua2g02c6t6b6eloudlne400jnmod4z')
 app.config['SESSION_SECRET'] = os.getenv('SESSION_SECRET', os.urandom(64))
@@ -104,29 +106,57 @@ def construct_chargebee_signup_url(sess):
     return result.hosted_page.values['url']
 
 
+def register_or_activate_bc_webhooks(user):
+    client = BigcommerceApi(client_id=get_bc_client_id(),
+                             store_hash=user.bc_store_hash,
+                             access_token=user.bc_access_token)
+
+    existing_webhooks = get_existing_webhooks(client)
+    if existing_webhooks:
+        for hook in existing_webhooks:
+            client.Webhook.get(hook.id).update(is_active=True)
+
+    if not existing_webhooks:
+        order_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
+        customer_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
+        shipment_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-shipments'
+
+        client.Webhooks.create(scope='store/order/*', destination=order_dest, is_active=True)
+        client.Webhooks.create(scope='store/customer/*', destination=customer_dest, is_active=True)
+        client.Webhooks.create(scope='store/shipment/*', destination=shipment_dest, is_active=True)
+
+        user.bc_webhooks_registered = True
+        user.save()
+
+
+def get_existing_webhooks(client):
+    try:
+        hooks = client.Webhooks.all()
+        if hooks:
+            return hooks
+        return []
+    except ClientRequestException:
+        return []
+
+
+def delete_all_webhooks(user):
+    client = BigcommerceApi(client_id=get_bc_client_id(),
+                            store_hash=user.bc_store_hash,
+                            access_token=user.bc_access_token)
+
+    try:
+        hooks = client.Webhooks.all()
+        if hooks:
+            for hook in hooks:
+                client.Webhooks.get(hook.id).delete()
+            return True
+        return False
+    except ClientRequestException:
+        return False
+
+
 @app.route('/')
 def index():
-    # app_user = get_query_first_result(AppUser, session['storeuserid'])
-    # if not app_user:
-    #     return "Not logged in!", 401
-    #
-    # # Construct api client
-    # client = BigcommerceApi(client_id=client_id(),
-    #                         store_hash=app_user.bc_store_hash,
-    #                         access_token=app_user.bc_access_token)
-    #
-    # # Fetch a few products
-    # orders = client.Orders.all(limit=10)
-    #
-    # # Render page
-    # context = dict()
-    # context['products'] = orders
-    # context['user'] = app_user.email
-    # context['store'] = app_user.bc_store_hash
-    # context['client_id'] = client_id()
-    # context['api_url'] = client.connection.host
-
-    hs_auth_url = construct_hubspot_auth_url()
 
     return render_template('index.html')
 
@@ -152,7 +182,12 @@ def auth_callback():
     if not app_user:
         app_user = AppUser(email, bc_id, bc_access_token=access_token, bc_scope=scope, bc_store_hash=store_hash)
 
-    app_user.save()
+    app_user.update(actions=[
+        AppUser.bc_access_token.set(access_token),
+        AppUser.bc_scope.set(scope),
+        AppUser.bc_store_hash.set(store_hash)
+    ])
+
     # Log user in and redirect to app home
     session['storeuserid'] = app_user.email
     return redirect(app.config['APP_URL'] + url_for('get_started'))
@@ -163,40 +198,42 @@ def load():
     # Decode and verify payload
     payload = request.args['signed_payload']
     user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret())
-    if user_data is False:
+    if not user_data:
         return "Payload verification failed!", 401
 
-    bc_id = user_data['user']['id']
     email = user_data['user']['email']
-    store_hash = user_data['store_hash']
 
     app_user = get_query_first_result(AppUser, email)
     if not app_user:
         return 'You will need to re-install this app. Please uninstall and then go to marketplace and click install.'
+
+    if not app_user.bc_webhooks_registered:
+        register_or_activate_bc_webhooks(app_user)
 
     # Log user in and redirect to app interface
     session['storeuserid'] = app_user.email
     return redirect(app.config['APP_URL'] + url_for('index'))
 
 
-# The Uninstall URL. See https://developer.bigcommerce.com/api/load
 @app.route('/bigcommerce/uninstall')
 def uninstall():
-    # Decode and verify payload
     payload = request.args['signed_payload']
     user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret())
-    if user_data is False:
+    if not user_data:
         return "Payload verification failed!", 401
 
-    bc_id = user_data['user']['id']
     email = user_data['user']['email']
-    store_hash = user_data['store_hash']
 
     app_user = get_query_first_result(AppUser, email)
-    if not app_user:
+    if not app_user.bc_deleted:
         return 'Already uninstalled!', 204
 
-    app_user.delete()
+    hooks_deleted = delete_all_webhooks(app_user)
+    if hooks_deleted:
+        app_user.update(actions=[
+            AppUser.bc_deleted.set(True),
+            AppUser.bc_webhooks_registered.set(False),
+        ])
     return Response('Deleted', status=204)
 
 

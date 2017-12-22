@@ -1,6 +1,6 @@
 from pynamodb.exceptions import QueryError
 from pynamodb.models import Model
-from pynamodb.attributes import UnicodeAttribute, NumberAttribute, ListAttribute
+from pynamodb.attributes import UnicodeAttribute, NumberAttribute, ListAttribute, BooleanAttribute
 
 
 __all__ = ['AppUser', 'get_query_first_result', 'QueryError']
@@ -28,6 +28,9 @@ class AppUser(Model):
     bc_store_hash = UnicodeAttribute()
     bc_access_token = UnicodeAttribute()
     bc_scope = UnicodeAttribute()
+    bc_webhooks_registered = BooleanAttribute(default=False)
+    bc_webhook_ids = ListAttribute(null=True)
+    bc_deleted = BooleanAttribute(default=False)
     hs_refresh_token = UnicodeAttribute(null=True)
     hs_access_token = UnicodeAttribute(null=True)
     hs_expires_in = UnicodeAttribute(null=True)
