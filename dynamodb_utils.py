@@ -22,10 +22,10 @@ class AppUser(Model):
         table_name = 'hubmetrix-user'
         region = 'us-west-1'
 
-    email = UnicodeAttribute(hash_key=True)
+    bc_store_hash = UnicodeAttribute(hash_key=True)
+    bc_email = UnicodeAttribute()
     bc_id = NumberAttribute(range_key=True)
     bc_store_id = UnicodeAttribute(null=True)
-    bc_store_hash = UnicodeAttribute()
     bc_access_token = UnicodeAttribute()
     bc_scope = UnicodeAttribute()
     bc_webhooks_registered = BooleanAttribute(default=False)

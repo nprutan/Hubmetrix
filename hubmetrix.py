@@ -1,6 +1,8 @@
 from bigcommerce.api import BigcommerceApi
 from bigcommerce.exception import ClientRequestException
 from flask import Flask, session, redirect, url_for, request, render_template, Response
+from werkzeug.exceptions import BadGateway
+
 from hubspot_utils import *
 from dynamodb_utils import *
 import chargebee
@@ -89,7 +91,7 @@ def construct_chargebee_signup_url(sess):
     chargebee.configure("test_RqcuUOam2qv17jcusG0eiypcuZlaiQH7Zc", "composedcloud-test")
 
     try:
-        email = sess['storeuserid']
+        email = sess['storeuseremail']
     except (KeyError, QueryError):
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
 
@@ -107,25 +109,28 @@ def construct_chargebee_signup_url(sess):
 
 
 def register_or_activate_bc_webhooks(user):
-    client = BigcommerceApi(client_id=get_bc_client_id(),
-                             store_hash=user.bc_store_hash,
-                             access_token=user.bc_access_token)
+    client = get_bc_client(user)
 
-    existing_webhooks = get_existing_webhooks(client)
-    if existing_webhooks:
-        for hook in existing_webhooks:
-            client.Webhook.get(hook.id).update(is_active=True)
+    try:
+        existing_webhooks = get_existing_webhooks(client)
+        if existing_webhooks:
+            for hook in existing_webhooks:
+                client.Webhook.get(hook.id).update(is_active=True)
 
-    if not existing_webhooks:
-        order_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
-        customer_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
-        shipment_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-shipments'
+        if not existing_webhooks:
+            order_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
+            customer_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
+            shipment_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-shipments'
 
-        client.Webhooks.create(scope='store/order/*', destination=order_dest, is_active=True)
-        client.Webhooks.create(scope='store/customer/*', destination=customer_dest, is_active=True)
-        client.Webhooks.create(scope='store/shipment/*', destination=shipment_dest, is_active=True)
+            client.Webhooks.create(scope='store/order/*', destination=order_dest, is_active=True)
+            client.Webhooks.create(scope='store/customer/*', destination=customer_dest, is_active=True)
+            client.Webhooks.create(scope='store/shipment/*', destination=shipment_dest, is_active=True)
 
-        user.bc_webhooks_registered = True
+            user.bc_webhooks_registered = True
+            user.save()
+    except BadGateway:
+        pass
+    finally:
         user.save()
 
 
@@ -140,9 +145,7 @@ def get_existing_webhooks(client):
 
 
 def delete_all_webhooks(user):
-    client = BigcommerceApi(client_id=get_bc_client_id(),
-                            store_hash=user.bc_store_hash,
-                            access_token=user.bc_access_token)
+    client = get_bc_client(user)
 
     try:
         hooks = client.Webhooks.all()
@@ -154,6 +157,11 @@ def delete_all_webhooks(user):
     except ClientRequestException:
         return False
 
+
+def get_bc_client(user):
+    return BigcommerceApi(client_id=get_bc_client_id(),
+                            store_hash=user.bc_store_hash,
+                            access_token=user.bc_access_token)
 
 @app.route('/')
 def index():
@@ -167,29 +175,28 @@ def auth_callback():
     code = request.args['code']
     context = request.args['context']
     scope = request.args['scope']
-    store_hash = context.split('/')[1]
+    bc_store_hash = context.split('/')[1]
     redirect_uri = app.config['APP_URL'] + url_for('auth_callback')
 
     # Fetch a permanent oauth token. This will throw an exception on error,
     # which will get caught by our error handler above.
-    client = BigcommerceApi(client_id=get_bc_client_id(), store_hash=store_hash)
+    client = BigcommerceApi(client_id=get_bc_client_id(), store_hash=bc_store_hash)
     token = client.oauth_fetch_token(get_bc_client_secret(), code, context, scope, redirect_uri)
     bc_id = token['user']['id']
     email = token['user']['email']
     access_token = token['access_token']
 
-    app_user = get_query_first_result(AppUser, email)
+    app_user = get_query_first_result(AppUser, bc_store_hash)
     if not app_user:
-        app_user = AppUser(email, bc_id, bc_access_token=access_token, bc_scope=scope, bc_store_hash=store_hash)
+        app_user = AppUser(bc_store_hash, bc_id, bc_email=email, bc_access_token=access_token, bc_scope=scope)
 
-    app_user.update(actions=[
-        AppUser.bc_access_token.set(access_token),
-        AppUser.bc_scope.set(scope),
-        AppUser.bc_store_hash.set(store_hash)
-    ])
+    app_user.save()
+
+    register_or_activate_bc_webhooks(app_user)
 
     # Log user in and redirect to app home
-    session['storeuserid'] = app_user.email
+    session['storehash'] = app_user.bc_store_hash
+    session['storeuseremail'] = email
     return redirect(app.config['APP_URL'] + url_for('get_started'))
 
 
@@ -201,9 +208,10 @@ def load():
     if not user_data:
         return "Payload verification failed!", 401
 
-    email = user_data['user']['email']
+    bc_store_hash = user_data['store_hash']
+    bc_email = user_data['user']['email']
 
-    app_user = get_query_first_result(AppUser, email)
+    app_user = get_query_first_result(AppUser, bc_store_hash)
     if not app_user:
         return 'You will need to re-install this app. Please uninstall and then go to marketplace and click install.'
 
@@ -211,7 +219,8 @@ def load():
         register_or_activate_bc_webhooks(app_user)
 
     # Log user in and redirect to app interface
-    session['storeuserid'] = app_user.email
+    session['storehash'] = app_user.bc_store_hash
+    session['storeuseremail'] = bc_email
     return redirect(app.config['APP_URL'] + url_for('index'))
 
 
@@ -222,18 +231,14 @@ def uninstall():
     if not user_data:
         return "Payload verification failed!", 401
 
-    email = user_data['user']['email']
+    bc_store_hash = user_data['store_hash']
 
-    app_user = get_query_first_result(AppUser, email)
-    if not app_user.bc_deleted:
-        return 'Already uninstalled!', 204
+    app_user = get_query_first_result(AppUser, bc_store_hash)
 
-    hooks_deleted = delete_all_webhooks(app_user)
-    if hooks_deleted:
-        app_user.update(actions=[
-            AppUser.bc_deleted.set(True),
-            AppUser.bc_webhooks_registered.set(False),
-        ])
+    delete_all_webhooks(app_user)
+
+    app_user.delete()
+
     return Response('Deleted', status=204)
 
 
@@ -245,8 +250,8 @@ def hsauth():
     client_id = get_hs_client_id()
     client_secret = get_hs_client_secret()
     try:
-        email = session['storeuserid']
-        app_user = get_query_first_result(AppUser, email)
+        bc_store_hash = session['storehash']
+        app_user = get_query_first_result(AppUser, bc_store_hash)
     except KeyError:
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
 
@@ -293,8 +298,8 @@ def payment_success():
 @app.route('/backtobigcommerce')
 def back_to_bigcommerce():
     try:
-        email = session['storeuserid']
-        app_user = get_query_first_result(AppUser, email)
+        bc_store_hash = session['storehash']
+        app_user = get_query_first_result(AppUser, bc_store_hash)
     except KeyError:
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
 
