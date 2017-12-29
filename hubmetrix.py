@@ -2,6 +2,7 @@ from bigcommerce.api import BigcommerceApi
 from bigcommerce.exception import ClientRequestException
 from flask import Flask, session, redirect, url_for, request, render_template, Response
 from werkzeug.exceptions import BadGateway
+from datetime import datetime
 
 from hubspot_utils import *
 from dynamodb_utils import *
@@ -249,6 +250,7 @@ def hsauth():
     redir_uri = get_hs_redir_uri()
     client_id = get_hs_client_id()
     client_secret = get_hs_client_secret()
+
     try:
         bc_store_hash = session['storehash']
         app_user = get_query_first_result(AppUser, bc_store_hash)
@@ -256,9 +258,9 @@ def hsauth():
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
 
     if code and app_user:
-        token_and_refresh = json.loads(exchange_code_for_token(code, client_id, client_secret, redir_uri))
+        token_and_refresh = exchange_code_for_token(code, client_id, client_secret, redir_uri)
         print(token_and_refresh)
-        token_info = json.loads(get_token_info(token_and_refresh['access_token']))
+        token_info = get_token_info(token_and_refresh['access_token'])
         print(token_info)
         app_user.hs_refresh_token = token_and_refresh['refresh_token']
         app_user.hs_access_token = token_and_refresh['access_token']
@@ -270,6 +272,7 @@ def hsauth():
         app_user.hs_user = token_info['user']
         app_user.hs_user_id = str(token_info['user_id'])
         app_user.hs_scopes = token_info['scopes']
+        app_user.hs_access_token_timestamp = datetime.now()
 
         app_user.save()
 

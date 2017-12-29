@@ -41,3 +41,5 @@ class AppUser(Model):
     hs_user = UnicodeAttribute(null=True)
     hs_user_id = UnicodeAttribute(null=True)
     hs_scopes = ListAttribute(null=True)
+    hs_properties_exist = BooleanAttribute(default=False)
+    hs_access_token_timestamp = UnicodeAttribute(null=True)

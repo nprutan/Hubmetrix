@@ -12,9 +12,9 @@ def exchange_code_for_token(auth_code, clnt_id, clnt_secret, redir_uri):
                                                                                                            redir_uri,
                                                                                                            auth_code)
 
-    return requests.post(HS_BASE_AUTH_URI, data=payload, headers=headers).text
+    return requests.post(HS_BASE_AUTH_URI, data=payload, headers=headers).json()
 
 
 def get_token_info(token):
     base_uri = 'https://api.hubapi.com/oauth/v1/access-tokens/'
-    return requests.get(base_uri + token).text
+    return requests.get(base_uri + token).json()
