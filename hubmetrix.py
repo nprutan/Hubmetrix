@@ -121,11 +121,12 @@ def register_or_activate_bc_webhooks(user):
         if not existing_webhooks:
             order_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
             customer_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
-            shipment_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-shipments'
+            # shipment_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-shipments'
 
-            client.Webhooks.create(scope='store/order/*', destination=order_dest, is_active=True)
-            client.Webhooks.create(scope='store/customer/*', destination=customer_dest, is_active=True)
-            client.Webhooks.create(scope='store/shipment/*', destination=shipment_dest, is_active=True)
+            client.Webhooks.create(scope='store/order/created', destination=order_dest, is_active=True)
+            client.Webhooks.create(scope='store/order/statusUpdated', destination=order_dest, is_active=True)
+            client.Webhooks.create(scope='store/customer/updated', destination=customer_dest, is_active=True)
+            # client.Webhooks.create(scope='store/shipment/*', destination=shipment_dest, is_active=True)
 
             user.bc_webhooks_registered = True
             user.save()
@@ -201,6 +202,9 @@ def auth_callback():
     return redirect(app.config['APP_URL'] + url_for('get_started'))
 
 
+# TODO: Need to enforce context
+# TODO: If user bails in the middle of install
+# TODO: take them to the appropriate step
 @app.route('/bigcommerce/load')
 def load():
     # Decode and verify payload
@@ -272,7 +276,7 @@ def hsauth():
         app_user.hs_user = token_info['user']
         app_user.hs_user_id = str(token_info['user_id'])
         app_user.hs_scopes = token_info['scopes']
-        app_user.hs_access_token_timestamp = datetime.now()
+        app_user.hs_access_token_timestamp = str(datetime.now())
 
         app_user.save()
 
