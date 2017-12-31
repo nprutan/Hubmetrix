@@ -6,6 +6,15 @@
         "project_name": "hubmetrix",
         "runtime": "python3.6",
         "s3_bucket": "zappa-63d2f3y6k",
-	"slim_handler": true
+	    "slim_handler": true,
+        "environment_variables": {
+            "APP_URL": "https://9kr5377xjf.execute-api.us-west-1.amazonaws.com",
+            "APP_BACKEND_URL": "https://up5sepzms9.execute-api.us-west-1.amazonaws.com",
+            "BC_CLIENT_ID": "5sdgtpwp82lxz5elfh5c5e2uvjzd07g",
+            "BC_CLIENT_SECRET": "rua2g02c6t6b6eloudlne400jnmod4z",
+            "HS_REDIRECT_URI": "https://9kr5377xjf.execute-api.us-west-1.amazonaws.com/dev/hsauth",
+            "HS_CLIENT_ID": "f0e25e19-d1f3-48fe-93fc-59d744e2326e",
+            "HS_CLIENT_SECRET": "74c80cfa-9bed-4770-8e31-a581df04a181"
+        }
     }
 }
