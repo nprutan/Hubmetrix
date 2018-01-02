@@ -220,6 +220,11 @@ def load():
     if not app_user.bc_webhooks_registered:
         register_or_activate_bc_webhooks(app_user)
 
+    if not app_user.hs_access_token:
+        return redirect(app.config['APP_URL'] + url_for('get_started'))
+
+    if not
+
     # Log user in and redirect to app interface
     session['storehash'] = app_user.bc_store_hash
     session['storeuseremail'] = bc_email
