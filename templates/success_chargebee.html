@@ -1,23 +1,98 @@
-{% extends "base.html" %}
-{% block title %}Index{% endblock %}
-{% block head %}
-    {{ super() }}
-{% endblock %}
-{% block content %}
-    <section class="features" id="features">
-      <div class="container">
-        <div class="section-heading text-center">
-          <h2>Success! You've completed payment setup!</h2>
-          <p class="text-muted">Please click below to finish up</p>
-            <div>
-                <img src="static/img/hubmetrix_to_payment_logo_small.png" alt="">
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- PAGE settings -->
+  <link rel="icon" href="https://templates.pingendo.com/assets/Pingendo_favicon.ico">
+  <title>App Flat - Pingendo template</title>
+  <meta name="description" content="Free Bootstrap 4 Pingendo Flat template made for app and softwares.">
+  <meta name="keywords" content="Pingendo app flat free template bootstrap 4">
+  <!-- CSS dependencies -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" type="text/css">
+  <link rel="stylesheet" href="../static/theme.css">
+  <!-- Script: Make my navbar transparent when the document is scrolled to top -->
+  <script src="../static/js/navbar-ontop.js"></script>
+  <!-- Script: Animated entrance -->
+  <script src="../static/js/animate-in.js"></script>
+</head>
+
+<body>
+  <!-- Navbar -->
+  <!-- Cover -->
+  <!-- Article style section -->
+  <div class="py-5">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-12 text-center">
+          <h1 class="">Thank You!
+            <br>You've Setup Your Payment Details</h1>
+          <p class="lead">Click blelow to finish setup</p>
+          <h1 class="text-secondary text-center"></h1>
+          <div class="row">
+            <div class="col-md-12 text-center">
+              <p class="lead text-secondary text-center"></p>
             </div>
-            <div>
-                <br/>
-                <a id="finish" href="{{url_for('back_to_bigcommerce')}}" class="btn btn-outline active btn-xl">Finish Setup</a>
-            </div>
-          <hr>
+          </div>
         </div>
       </div>
-    </section>
-{% endblock %}
+      <div class="row py-3">
+        <div class="col-md-4"></div>
+        <div class="col-md-4">
+          <a class="btn btn-primary btn-lg active text-light mx-auto px-5 text-center justify-content-center flex-row d-flex" href="{{url_for('payment_success')}}" data-toggle="">Finish
+            <br>
+          </a>
+        </div>
+        <div class="col-md-4"></div>
+      </div>
+    </div>
+    <div class="container">
+      <div class="row">
+        <div class="col-md-12"></div>
+      </div>
+      <div class="row py-3"></div>
+      <div class="row"></div>
+    </div>
+  </div>
+  <!-- Features -->
+  <!-- Features -->
+  <!-- Carousel reviews -->
+  <!-- Call to action -->
+  <!-- Footer -->
+  <div class="py-5 bg-secondary">
+    <div class="container">
+      <div class="row">
+        <div class="col-md-9">
+          <p class="lead">Support Contact</p>
+          <p class="">support@composedcloud.com</p>
+        </div>
+        <div class="col-4 col-md-1 align-self-center my-3">
+          <a href="https://www.facebook.com" target="blank"><i class="fa fa-fw fa-facebook fa-3x text-white"></i></a>
+        </div>
+        <div class="col-4 col-md-1 align-self-center my-3">
+          <a href="https://twitter.com" target="blank"><i class="fa fa-fw fa-twitter fa-3x text-white"></i></a>
+        </div>
+        <div class="col-4 col-md-1 align-self-center my-3">
+          <a href="https://www.instagram.com" target="blank"></a>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-12 my-3 text-center">
+          <p class="text-muted">© Copyright 2017 Composed Cloud Solutions - All rights reserved.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- JavaScript dependencies -->
+  <script src="https://code.jquery.com/jquery-3.2.1.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js" integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh" crossorigin="anonymous"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-beta/js/bootstrap.min.js" integrity="sha384-h0AbiXch4ZDo7tp9hKZ4TsHbi047NrKGLO3SEJAg45jXxnGIfYzk4Si90RDIqNm1" crossorigin="anonymous"></script>
+  <!-- Script: Smooth scrolling between anchors in the same page -->
+  <script src="../static/js/smooth-scroll.js"></script>
+  <pingendo onclick="window.open('https://pingendo.com/', '_blank')" style="cursor:pointer;position: fixed;bottom: 10px;right:10px;padding:4px;background-color: #00b0eb;border-radius: 8px; width:110px;display:flex;flex-direction:row;align-items:center;justify-content:center;font-size:14px;color:white">made with&nbsp;&nbsp;
+    <img src="https://pingendo.com/site-assets/Pingendo_logo_big.png" class="d-block" alt="Pingendo logo" height="16">
+  </pingendo>
+</body>
+
+</html>

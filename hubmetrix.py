@@ -1,28 +1,28 @@
-from bigcommerce.api import BigcommerceApi
-from bigcommerce.exception import ClientRequestException
-from flask import Flask, session, redirect, url_for, request, render_template, Response
-from werkzeug.exceptions import BadGateway
+from flask import Flask, session, redirect, request, Response
 from datetime import datetime
-
 from hubspot_utils import *
 from dynamodb_utils import *
-import chargebee
+from hubmetrix_utils import *
 import os
-import json
 
 app = Flask(__name__)
 
 
+app.config['STAGE'] = 'dev' if os.environ.get('STAGE') is 'dev' else ''
 app.config['APP_URL'] = os.environ.get('APP_URL')
 app.config['APP_BACKEND_URL'] = os.environ.get('APP_BACKEND_URL')
 app.config['BC_CLIENT_ID'] = os.environ.get('BC_CLIENT_ID')
 app.config['BC_CLIENT_SECRET'] = os.environ.get('BC_CLIENT_SECRET')
 app.config['SESSION_SECRET'] = os.getenv('SESSION_SECRET', os.urandom(64))
-app.config['HS_REDIRECT_URI'] = os.environ.get('HS_REDIRECT_URI')
+app.config['HS_REDIRECT_URI'] = os.environ.get('APP_URL') + app.config['STAGE'] + url_for('hs_auth_callback')
 app.config['HS_CLIENT_ID'] = os.environ.get('HS_CLIENT_ID')
 app.config['HS_CLIENT_SECRET'] = os.environ.get('HS_CLIENT_SECRET')
+app.config['CHARGEBEE-API-KEY'] = os.environ.get('CHARGEBEE-API-KEY')
+app.config['CHARGEBEE-SITE'] = os.environ.get('CHARGEBEE-SITE')
+
 
 app.secret_key = app.config['SESSION_SECRET']
+
 
 #
 # Error handling and helpers
@@ -52,120 +52,22 @@ def bad_request(e):
     return content, 400
 
 
-# Helper for template rendering
-def render(template, context):
-    return render_template(template, **context)
-
-
-def get_bc_client_id():
-    return app.config['BC_CLIENT_ID']
-
-
-def get_bc_client_secret():
-    return app.config['BC_CLIENT_SECRET']
-
-
-def get_hs_client_id():
-    return app.config['HS_CLIENT_ID']
-
-
-def get_hs_client_secret():
-    return app.config['HS_CLIENT_SECRET']
-
-
-def get_hs_redir_uri():
-    return app.config['HS_REDIRECT_URI']
-
-
-def construct_hubspot_auth_url():
-    client_id = get_hs_client_id()
-    redir_uri = get_hs_redir_uri()
-
-    return 'https://app.hubspot.com/oauth/authorize?client_id={}&scope=contacts%20automation%20timeline&redirect_uri={}'.format(
-        client_id, redir_uri)
-
-
-def construct_chargebee_signup_url(sess):
-    chargebee.configure("test_RqcuUOam2qv17jcusG0eiypcuZlaiQH7Zc", "composedcloud-test")
-
-    try:
-        email = sess['storeuseremail']
-    except (KeyError, QueryError):
-        return "User not logged in! Please go back and click on app icon in admin panel.", 401
-
-    result = chargebee.HostedPage.checkout_new({
-        "subscription": {
-            "plan_id": "hubmetrix-base-plan"
-        },
-        "customer": {
-            "email": email
-        },
-        "redirect_url": app.config['APP_URL'] + url_for('payment_success'),
-        "embed": True
-    })
-    return result.hosted_page.values['url']
-
-
-def register_or_activate_bc_webhooks(user):
-    client = get_bc_client(user)
-
-    try:
-        existing_webhooks = get_existing_webhooks(client)
-        if existing_webhooks:
-            for hook in existing_webhooks:
-                client.Webhook.get(hook.id).update(is_active=True)
-
-        if not existing_webhooks:
-            order_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
-            customer_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
-            # shipment_dest = app.config['APP_BACKEND_URL'] + '/dev/bc-ingest-shipments'
-
-            client.Webhooks.create(scope='store/order/created', destination=order_dest, is_active=True)
-            client.Webhooks.create(scope='store/order/statusUpdated', destination=order_dest, is_active=True)
-            client.Webhooks.create(scope='store/customer/updated', destination=customer_dest, is_active=True)
-            # client.Webhooks.create(scope='store/shipment/*', destination=shipment_dest, is_active=True)
-
-            user.bc_webhooks_registered = True
-            user.save()
-    except BadGateway:
-        pass
-    finally:
-        user.save()
-
-
-def get_existing_webhooks(client):
-    try:
-        hooks = client.Webhooks.all()
-        if hooks:
-            return hooks
-        return []
-    except ClientRequestException:
-        return []
-
-
-def delete_all_webhooks(user):
-    client = get_bc_client(user)
-
-    try:
-        hooks = client.Webhooks.all()
-        if hooks:
-            for hook in hooks:
-                client.Webhooks.get(hook.id).delete()
-            return True
-        return False
-    except ClientRequestException:
-        return False
-
-
-def get_bc_client(user):
-    return BigcommerceApi(client_id=get_bc_client_id(),
-                            store_hash=user.bc_store_hash,
-                            access_token=user.bc_access_token)
-
 @app.route('/')
 def index():
+    bc_store_hash = session['storehash']
+    app_user = get_query_first_result(AppUser, bc_store_hash)
+    last_sync = app_user.hm_last_sync_timestamp
+    days_until_charge = 30
+    context = dict(last_sync=last_sync, days_until_next_charge=days_until_charge)
 
-    return render_template('index.html')
+    return render_template('index.html', ctx=context)
+
+
+@app.route('/planinfo')
+def plan_info():
+    context = dict(plan_info='base plan info',
+                   hubmetrix_plan='base plan')
+    return render_template('plan_info.html', ctx=context)
 
 
 @app.route('/bigcommerce/callback')
@@ -179,8 +81,8 @@ def auth_callback():
 
     # Fetch a permanent oauth token. This will throw an exception on error,
     # which will get caught by our error handler above.
-    client = BigcommerceApi(client_id=get_bc_client_id(), store_hash=bc_store_hash)
-    token = client.oauth_fetch_token(get_bc_client_secret(), code, context, scope, redirect_uri)
+    client = BigcommerceApi(client_id=get_bc_client_id(app.config), store_hash=bc_store_hash)
+    token = client.oauth_fetch_token(get_bc_client_secret(app.config), code, context, scope, redirect_uri)
     bc_id = token['user']['id']
     email = token['user']['email']
     access_token = token['access_token']
@@ -191,12 +93,12 @@ def auth_callback():
 
     app_user.save()
 
-    register_or_activate_bc_webhooks(app_user)
+    register_or_activate_bc_webhooks(app_user, app.config)
 
     # Log user in and redirect to app home
     session['storehash'] = app_user.bc_store_hash
     session['storeuseremail'] = email
-    return redirect(app.config['APP_URL'] + url_for('get_started'))
+    return redirect(app.config['APP_URL'] + app.config['STAGE'] + url_for('get_started'))
 
 
 # TODO: Need to enforce context
@@ -206,7 +108,7 @@ def auth_callback():
 def load():
     # Decode and verify payload
     payload = request.args['signed_payload']
-    user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret())
+    user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret(app.config))
     if not user_data:
         return "Payload verification failed!", 401
 
@@ -218,23 +120,27 @@ def load():
         return 'You will need to re-install this app. Please uninstall and then go to marketplace and click install.'
 
     if not app_user.bc_webhooks_registered:
-        register_or_activate_bc_webhooks(app_user)
+        register_or_activate_bc_webhooks(app_user, app.config)
 
     if not app_user.hs_access_token:
-        return redirect(app.config['APP_URL'] + url_for('get_started'))
+        return redirect(app.config['APP_URL'] + app.config['STAGE'] + url_for('get_started'))
 
-    if not
+    if not app_user.cb_subscription_id:
+        signup_page = construct_chargebee_signup_url(session, app.config)
+        return render_template('success_hubspot.html', chargebee_hosted_url=signup_page)
 
     # Log user in and redirect to app interface
     session['storehash'] = app_user.bc_store_hash
     session['storeuseremail'] = bc_email
-    return redirect(app.config['APP_URL'] + url_for('index'))
+    session['cb_subscription_id'] = app_user.cb_subscription_id
+
+    return redirect(app.config['APP_URL'] + app.config['STAGE'] + url_for('index'))
 
 
 @app.route('/bigcommerce/uninstall')
 def uninstall():
     payload = request.args['signed_payload']
-    user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret())
+    user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret(app.config))
     if not user_data:
         return "Payload verification failed!", 401
 
@@ -242,7 +148,7 @@ def uninstall():
 
     app_user = get_query_first_result(AppUser, bc_store_hash)
 
-    delete_all_webhooks(app_user)
+    delete_all_webhooks(app_user, app.config)
 
     app_user.delete()
 
@@ -250,12 +156,11 @@ def uninstall():
 
 
 @app.route('/hsauth')
-def hsauth():
-    global signup_page
+def hs_auth_callback():
     code = request.args.get('code')
-    redir_uri = get_hs_redir_uri()
-    client_id = get_hs_client_id()
-    client_secret = get_hs_client_secret()
+    redir_uri = get_hs_redir_uri(app.config)
+    client_id = get_hs_client_id(app.config)
+    client_secret = get_hs_client_secret(app.config)
 
     try:
         bc_store_hash = session['storehash']
@@ -265,9 +170,7 @@ def hsauth():
 
     if code and app_user:
         token_and_refresh = exchange_code_for_token(code, client_id, client_secret, redir_uri)
-        print(token_and_refresh)
         token_info = get_token_info(token_and_refresh['access_token'])
-        print(token_info)
         app_user.hs_refresh_token = token_and_refresh['refresh_token']
         app_user.hs_access_token = token_and_refresh['access_token']
         app_user.hs_expires_in = str(token_and_refresh['expires_in'])
@@ -282,33 +185,30 @@ def hsauth():
 
         app_user.save()
 
-        signup_page = construct_chargebee_signup_url(session)
+        signup_page = construct_chargebee_signup_url(session, app.config)
     return render_template('success_hubspot.html', chargebee_hosted_url=signup_page)
 
 
 @app.route('/getstarted')
 def get_started():
-    hs_auth_url = construct_hubspot_auth_url()
+    hs_auth_url = construct_hubspot_auth_url(app.config)
 
     return render_template('get_started.html', hs_auth_url=hs_auth_url)
 
+
 @app.route('/paymentsetup')
 def payment_setup():
-    signup_page = construct_chargebee_signup_url(session)
+    signup_page = construct_chargebee_signup_url(session, app.config)
 
     return render_template('chargebee_setup.html', chargebee_hosted_url=signup_page)
 
 
 @app.route('/paymentsuccess')
 def payment_success():
-
-    return render_template('success_chargebee.html')
-
-@app.route('/backtobigcommerce')
-def back_to_bigcommerce():
     try:
         bc_store_hash = session['storehash']
         app_user = get_query_first_result(AppUser, bc_store_hash)
+        cb_subscription = get_chargebee_subscription(app_user.cb_subscription_id)
     except KeyError:
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
 
