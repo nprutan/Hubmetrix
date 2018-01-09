@@ -3,22 +3,25 @@ from datetime import datetime
 from hubspot_utils import *
 from dynamodb_utils import *
 from hubmetrix_utils import *
+from happiness_scale import get_happy
+import pendulum
 import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='templates/static')
 
 
-app.config['STAGE'] = 'dev' if os.environ.get('STAGE') is 'dev' else ''
-app.config['APP_URL'] = os.environ.get('APP_URL')
-app.config['APP_BACKEND_URL'] = os.environ.get('APP_BACKEND_URL')
-app.config['BC_CLIENT_ID'] = os.environ.get('BC_CLIENT_ID')
-app.config['BC_CLIENT_SECRET'] = os.environ.get('BC_CLIENT_SECRET')
+app.config['STAGE-PREFIX'] = os.environ.get('STAGE-PREFIX', '/dev')
+app.config['APP_URL'] = os.environ.get('APP_URL', 'http://localhost')
+app.config['APP_BACKEND_URL'] = os.environ.get('APP_BACKEND_URL', 'http://localhost/backend')
+app.config['BC_CLIENT_ID'] = os.environ.get('BC_CLIENT_ID', '')
+app.config['BC_CLIENT_SECRET'] = os.environ.get('BC_CLIENT_SECRET', '')
 app.config['SESSION_SECRET'] = os.getenv('SESSION_SECRET', os.urandom(64))
-app.config['HS_REDIRECT_URI'] = os.environ.get('APP_URL') + app.config['STAGE'] + url_for('hs_auth_callback')
-app.config['HS_CLIENT_ID'] = os.environ.get('HS_CLIENT_ID')
-app.config['HS_CLIENT_SECRET'] = os.environ.get('HS_CLIENT_SECRET')
-app.config['CHARGEBEE-API-KEY'] = os.environ.get('CHARGEBEE-API-KEY')
-app.config['CHARGEBEE-SITE'] = os.environ.get('CHARGEBEE-SITE')
+app.config['HS_REDIRECT_URI'] = os.environ.get('APP_URL', '') + app.config['STAGE-PREFIX'] + '/hsauth'
+app.config['HS_CLIENT_ID'] = os.environ.get('HS_CLIENT_ID', '')
+app.config['HS_CLIENT_SECRET'] = os.environ.get('HS_CLIENT_SECRET', '')
+app.config['CHARGEBEE-API-KEY'] = os.environ.get('CHARGEBEE-API-KEY', '')
+app.config['CHARGEBEE-SITE'] = os.environ.get('CHARGEBEE-SITE', '')
+app.config['APP_ID'] = os.environ.get('APP_ID')
 
 
 app.secret_key = app.config['SESSION_SECRET']
@@ -57,17 +60,63 @@ def index():
     bc_store_hash = session['storehash']
     app_user = get_query_first_result(AppUser, bc_store_hash)
     last_sync = app_user.hm_last_sync_timestamp
-    days_until_charge = 30
-    context = dict(last_sync=last_sync, days_until_next_charge=days_until_charge)
+    sub = get_chargebee_subscription_by_id(app_user.cb_subscription_id, config=app.config)
+
+    if sub.cancelled_at:
+        period = pendulum.from_timestamp(sub.cancelled_at) - pendulum.now()
+        if sub.status == 'cancelled':
+            return redirect(url_for('maybe_reactivate_plan'))
+        else:
+            next_charge = 'Cancelled At: {}\r'.format(pendulum.from_timestamp(sub.cancelled_at).to_day_datetime_string())
+            next_charge += 'Days Left In Subscription: {}'.format(period.days)
+    else:
+        next_charge = pendulum.from_timestamp(sub.next_billing_at).to_cookie_string()
+    happy_scale, happy_encouragement = get_happy()
+    context = dict(last_sync=last_sync,
+                   next_charge_date=next_charge,
+                   happy_scale=happy_scale,
+                   happy_encouragement=happy_encouragement)
 
     return render_template('index.html', ctx=context)
 
 
-@app.route('/planinfo')
-def plan_info():
-    context = dict(plan_info='base plan info',
-                   hubmetrix_plan='base plan')
-    return render_template('plan_info.html', ctx=context)
+@app.route('/bigcommerce/load')
+def load():
+    # Decode and verify payload
+    payload = request.args['signed_payload']
+    user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret(app.config))
+    if not user_data:
+        return "Payload verification failed!", 401
+
+    bc_store_hash = user_data['store_hash']
+    bc_email = user_data['user']['email']
+
+    app_user = get_query_first_result(AppUser, bc_store_hash)
+    if not app_user:
+        return 'You will need to re-install this app. Please uninstall and then go to marketplace and click install.'
+
+    if not app_user.bc_webhooks_registered:
+        register_or_activate_bc_webhooks(app_user, app.config)
+
+    if not app_user.hs_access_token:
+        return redirect(app.config['APP_URL'] + url_for('get_started'))
+
+    if not app_user.cb_subscription_id:
+        sub = get_chargebee_subscription_by_email(bc_email, config=app.config)
+        if sub:
+            update_subscription_id(app_user, sub.subscription.id)
+        else:
+            app_url = app.config['APP_URL']
+            signup_page_id, signup_page_url = construct_chargebee_signup_url(session, app_url, config=app.config)
+            session['hosted_page_id'] = signup_page_id
+            return render_template('success_hubspot.html', chargebee_hosted_url=signup_page_url)
+
+    # Log user in and redirect to app interface
+    session['storehash'] = app_user.bc_store_hash
+    session['storeuseremail'] = bc_email
+    session['cb_subscription_id'] = app_user.cb_subscription_id
+
+    return redirect(app.config['APP_URL'] + url_for('index'))
 
 
 @app.route('/bigcommerce/callback')
@@ -98,43 +147,14 @@ def auth_callback():
     # Log user in and redirect to app home
     session['storehash'] = app_user.bc_store_hash
     session['storeuseremail'] = email
-    return redirect(app.config['APP_URL'] + app.config['STAGE'] + url_for('get_started'))
+    return redirect(app.config['APP_URL'] + url_for('get_started'))
 
 
-# TODO: Need to enforce context
-# TODO: If user bails in the middle of install
-# TODO: take them to the appropriate step
-@app.route('/bigcommerce/load')
-def load():
-    # Decode and verify payload
-    payload = request.args['signed_payload']
-    user_data = BigcommerceApi.oauth_verify_payload(payload, get_bc_client_secret(app.config))
-    if not user_data:
-        return "Payload verification failed!", 401
+@app.route('/getstarted')
+def get_started():
+    hs_auth_url = construct_hubspot_auth_url(app.config)
 
-    bc_store_hash = user_data['store_hash']
-    bc_email = user_data['user']['email']
-
-    app_user = get_query_first_result(AppUser, bc_store_hash)
-    if not app_user:
-        return 'You will need to re-install this app. Please uninstall and then go to marketplace and click install.'
-
-    if not app_user.bc_webhooks_registered:
-        register_or_activate_bc_webhooks(app_user, app.config)
-
-    if not app_user.hs_access_token:
-        return redirect(app.config['APP_URL'] + app.config['STAGE'] + url_for('get_started'))
-
-    if not app_user.cb_subscription_id:
-        signup_page = construct_chargebee_signup_url(session, app.config)
-        return render_template('success_hubspot.html', chargebee_hosted_url=signup_page)
-
-    # Log user in and redirect to app interface
-    session['storehash'] = app_user.bc_store_hash
-    session['storeuseremail'] = bc_email
-    session['cb_subscription_id'] = app_user.cb_subscription_id
-
-    return redirect(app.config['APP_URL'] + app.config['STAGE'] + url_for('index'))
+    return render_template('get_started.html', hs_auth_url=hs_auth_url)
 
 
 @app.route('/bigcommerce/uninstall')
@@ -185,35 +205,87 @@ def hs_auth_callback():
 
         app_user.save()
 
-        signup_page = construct_chargebee_signup_url(session, app.config)
-    return render_template('success_hubspot.html', chargebee_hosted_url=signup_page)
+        # TODO: Implement a check for a cancelled
+        # TODO: subscription.
+        if not app_user.cb_subscription_id:
+            sub = get_chargebee_subscription_by_email(app_user.bc_email, config=app.config)
+            if sub:
+                update_subscription_id(app_user, sub.subscription.id)
+                return redirect(app.config['APP_URL'] + url_for('index'))
 
-
-@app.route('/getstarted')
-def get_started():
-    hs_auth_url = construct_hubspot_auth_url(app.config)
-
-    return render_template('get_started.html', hs_auth_url=hs_auth_url)
-
-
-@app.route('/paymentsetup')
-def payment_setup():
-    signup_page = construct_chargebee_signup_url(session, app.config)
-
-    return render_template('chargebee_setup.html', chargebee_hosted_url=signup_page)
+        app_url = app.config['APP_URL']
+        signup_page_id, signup_page_url = construct_chargebee_signup_url(session, app_url, config=app.config)
+        session['hosted_page_id'] = signup_page_id
+    return render_template('success_hubspot.html', chargebee_hosted_url=signup_page_url)
 
 
 @app.route('/paymentsuccess')
 def payment_success():
     try:
         bc_store_hash = session['storehash']
+        hosted_page_id = session['hosted_page_id']
         app_user = get_query_first_result(AppUser, bc_store_hash)
-        cb_subscription = get_chargebee_subscription(app_user.cb_subscription_id)
+        cb_subscription = get_chargebee_hosted_page(hosted_page_id, config=app.config)
+        cb_subscription_id = cb_subscription.content.subscription.id
+        app_user.update(actions=[
+            AppUser.cb_subscription_id.set(cb_subscription_id)
+            ]
+        )
     except KeyError:
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
 
-    redirect_url = 'https://store-{}.mybigcommerce.com/manage/'.format(app_user.bc_store_hash)
+    app_id = app.config['APP_ID']
+
+    redirect_url = 'https://store-{}.mybigcommerce.com/manage/app/{}'.format(app_user.bc_store_hash, app_id)
     return redirect(redirect_url)
+
+
+@app.route('/maybecancelplan')
+def maybe_cancel_plan():
+    return render_template('cancel_plan.html')
+
+
+@app.route('/cancelplan')
+def cancel_plan():
+    bc_store_hash = session['storehash']
+    app_user = get_query_first_result(AppUser, bc_store_hash)
+    subscription_id = app_user.cb_subscription_id
+
+    cancelled_sub = cancel_chargebee_subscription_by_id(subscription_id, config=app.config)
+    session['cancelled_date'] = cancelled_sub.current_term_end
+
+    return redirect(url_for('index'))
+
+
+@app.route('/planinfo')
+def plan_info():
+    bc_store_hash = session['storehash']
+    app_user = get_query_first_result(AppUser, bc_store_hash)
+    sub = get_chargebee_subscription_by_id(app_user.cb_subscription_id, config=app.config)
+
+    context = dict(current_term_start=pendulum.from_timestamp(sub.current_term_start).to_date_string(),
+                   current_term_end=pendulum.from_timestamp(sub.current_term_end).to_date_string(),
+                   status=sub.status,
+                   plan_unit_price='${}'.format(sub.plan_unit_price/100),
+                   plan_id=sub.plan_id,
+                   billing_period=sub.billing_period,
+                   billing_period_unit=sub.billing_period_unit,
+                   due_invoices_count=sub.due_invoices_count)
+    return render_template('plan_info.html', ctx=context)
+
+
+@app.route('/maybereactivateplan')
+def maybe_reactivate_plan():
+    return render_template('reactivate_plan.html')
+
+
+@app.route('/reactivateplan')
+def reactivate_plan():
+    bc_store_hash = session['storehash']
+    app_user = get_query_first_result(AppUser, bc_store_hash)
+    reactivate_chargebee_subscription_by_id(app_user.cb_subscription_id, config=app.config)
+
+    return redirect(url_for('index'))
 
 
 if __name__ == '__main__':

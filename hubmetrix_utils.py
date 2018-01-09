@@ -1,5 +1,6 @@
 from bigcommerce.api import BigcommerceApi
 from bigcommerce.exception import ClientRequestException
+from dynamodb_utils import AppUser
 from pynamodb.exceptions import QueryError
 from werkzeug.exceptions import BadGateway
 from flask import url_for, render_template
@@ -38,9 +39,15 @@ def construct_hubspot_auth_url(config):
         client_id, redir_uri)
 
 
-def construct_chargebee_signup_url(sess, config):
-    chargebee.configure(config['CHARGEBEE-API-KEY'], config['CHARGEBEE-SITE'])
+def configure_chargebee_api(func):
+    def wrapper(*args, **kwargs):
+        chargebee.configure(kwargs['config']['CHARGEBEE-API-KEY'], kwargs['config']['CHARGEBEE-SITE'])
+        return func(*args)
+    return wrapper
 
+
+@configure_chargebee_api
+def construct_chargebee_signup_url(sess, app_url):
     try:
         email = sess['storeuseremail']
     except (KeyError, QueryError):
@@ -53,14 +60,47 @@ def construct_chargebee_signup_url(sess, config):
         "customer": {
             "email": email
         },
-        "redirect_url": config['APP_URL'] + config['STAGE'] + url_for('payment_success'),
+        "redirect_url": app_url + url_for('payment_success'),
         "embed": True
     })
-    return result.hosted_page.values['url']
+    return result.hosted_page.values['id'], result.hosted_page.values['url']
 
 
-def get_chargebee_subscription(user):
-    result = chargebee.Subscription.retrieve(user.cb_subscription_id)
+def update_subscription_id(user, subscription_id):
+    user.update(actions=[
+        AppUser.cb_subscription_id.set(subscription_id)]
+    )
+
+
+@configure_chargebee_api
+def get_chargebee_subscription_by_email(email):
+    result = chargebee.Customer.list({'email': email})
+    if result:
+        return chargebee.Subscription.list({'customer_id': result[0].customer.id})[0]
+    else:
+        return result
+
+@configure_chargebee_api
+def get_chargebee_subscription_by_id(subscription_id):
+    result = chargebee.Subscription.retrieve(subscription_id)
+    return result.subscription
+
+
+@configure_chargebee_api
+def get_chargebee_hosted_page(page_id):
+    result = chargebee.HostedPage.retrieve(page_id)
+    return result.hosted_page
+
+
+@configure_chargebee_api
+def cancel_chargebee_subscription_by_id(subscription_id):
+    result = chargebee.Subscription.cancel(subscription_id, {'end_of_term': True})
+    return result.subscription
+
+
+@configure_chargebee_api
+def reactivate_chargebee_subscription_by_id(subscription_id):
+    result = chargebee.Subscription.reactivate(subscription_id)
     return result.subscription
 
 
