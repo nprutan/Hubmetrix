@@ -9,7 +9,6 @@ import os
 
 app = Flask(__name__, static_folder='templates/static')
 
-
 app.config['STAGE-PREFIX'] = os.environ.get('STAGE-PREFIX', '/dev')
 app.config['APP_URL'] = os.environ.get('APP_URL', 'http://localhost')
 app.config['APP_BACKEND_URL'] = os.environ.get('APP_BACKEND_URL', 'http://localhost/backend')
@@ -22,7 +21,6 @@ app.config['HS_CLIENT_SECRET'] = os.environ.get('HS_CLIENT_SECRET', '')
 app.config['CHARGEBEE-API-KEY'] = os.environ.get('CHARGEBEE-API-KEY', '')
 app.config['CHARGEBEE-SITE'] = os.environ.get('CHARGEBEE-SITE', '')
 app.config['APP_ID'] = os.environ.get('APP_ID')
-
 
 app.secret_key = app.config['SESSION_SECRET']
 
@@ -67,13 +65,19 @@ def index():
         if sub.status == 'cancelled':
             return redirect(url_for('maybe_reactivate_plan'))
         else:
-            next_charge = 'Cancelled At: {}\r'.format(pendulum.from_timestamp(sub.cancelled_at).to_day_datetime_string())
+            next_charge = 'Cancels On: {}\r'.format(
+                pendulum.from_timestamp(sub.cancelled_at).to_day_datetime_string())
             next_charge += 'Days Left In Subscription: {}'.format(period.days)
+            next_charge_explain = 'We\'re sad you\'re leaving, but we know you will keep being awesome! Your plan ' \
+                                  'stay active until the date above'
     else:
         next_charge = pendulum.from_timestamp(sub.next_billing_at).to_cookie_string()
+        next_charge_explain = 'The date of your next charge. If you\'d like to change your plan click above on ' \
+                              'Plan Info. '
     happy_scale, happy_encouragement = get_happy()
     context = dict(last_sync=last_sync,
                    next_charge_date=next_charge,
+                   next_charge_explain=next_charge_explain,
                    happy_scale=happy_scale,
                    happy_encouragement=happy_encouragement)
 
@@ -229,7 +233,7 @@ def payment_success():
         cb_subscription_id = cb_subscription.content.subscription.id
         app_user.update(actions=[
             AppUser.cb_subscription_id.set(cb_subscription_id)
-            ]
+        ]
         )
     except KeyError:
         return "User not logged in! Please go back and click on app icon in admin panel.", 401
@@ -262,11 +266,13 @@ def plan_info():
     bc_store_hash = session['storehash']
     app_user = get_query_first_result(AppUser, bc_store_hash)
     sub = get_chargebee_subscription_by_id(app_user.cb_subscription_id, config=app.config)
+    start = pendulum.from_timestamp(sub.current_term_start).to_date_string() if sub.current_term_start else 'In Trial'
+    end = pendulum.from_timestamp(sub.current_term_end).to_date_string() if sub.current_term_end else 'In Trial'
 
-    context = dict(current_term_start=pendulum.from_timestamp(sub.current_term_start).to_date_string(),
-                   current_term_end=pendulum.from_timestamp(sub.current_term_end).to_date_string(),
+    context = dict(current_term_start=start,
+                   current_term_end=end,
                    status=sub.status,
-                   plan_unit_price='${}'.format(sub.plan_unit_price/100),
+                   plan_unit_price='${}'.format(sub.plan_unit_price / 100),
                    plan_id=sub.plan_id,
                    billing_period=sub.billing_period,
                    billing_period_unit=sub.billing_period_unit,
