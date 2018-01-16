@@ -1,11 +1,10 @@
-from flask import Flask, session, redirect, request, Response
-from datetime import datetime
-from hubspot_utils import *
-from dynamodb_utils import *
-from hubmetrix_utils import *
-from happiness_scale import get_happy
-import pendulum
+import json
 import os
+
+from flask import Flask, session, redirect, request, Response
+
+from happiness_scale import get_happy
+from hubmetrix_utils import *
 
 app = Flask(__name__, static_folder='templates/static')
 
@@ -80,6 +79,11 @@ def load():
     with payload_manager(request.args, app.config) as payload_ctx:
         bc_store_hash, bc_email = payload_ctx
         app_user = get_query_first_result(AppUser, bc_store_hash)
+
+        session.permanent = True
+        session['storehash'] = app_user.bc_store_hash
+        session['storeuseremail'] = bc_email
+
         if not app_user:
             raise LookupError('No user found! Please reinstall app!')
 
@@ -87,15 +91,14 @@ def load():
             return redirect(app.config['APP_URL'] + url_for('get_started'))
 
         if check_and_provision_subscription(app_user, app.config):
-            session['storehash'] = app_user.bc_store_hash
-            session['storeuseremail'] = bc_email
             session['cb_subscription_id'] = app_user.cb_subscription_id
             return redirect(app.config['APP_URL'] + url_for('index'))
 
         app_url = app.config['APP_URL']
+        stage = app.config['STAGE-PREFIX']
         signup_page_id, signup_page_url = construct_chargebee_signup_url(bc_email, app_url, config=app.config)
         session['hosted_page_id'] = signup_page_id
-        return render_template('success_hubspot.html', chargebee_hosted_url=signup_page_url)
+        return render_template('success_hubspot.html', chargebee_hosted_url=signup_page_url, app_url=app_url+stage+'/')
 
 
 @app.route('/bigcommerce/callback')
@@ -155,18 +158,16 @@ def hs_auth_callback():
 
 @app.route('/paymentsuccess')
 def payment_success():
-    try:
-        bc_store_hash = session['storehash']
-        hosted_page_id = session['hosted_page_id']
-        app_user = get_query_first_result(AppUser, bc_store_hash)
-        cb_subscription = get_chargebee_hosted_page(hosted_page_id, config=app.config)
-        cb_subscription_id = cb_subscription.content.subscription.id
-        app_user.cb_subscription_id = cb_subscription_id
+    bc_store_hash = session['storehash']
+    hosted_page_id = session['hosted_page_id']
+    app_user = get_query_first_result(AppUser, bc_store_hash)
+    cb_subscription = get_chargebee_hosted_page(hosted_page_id, config=app.config)
+    cb_subscription_id = cb_subscription.content.subscription.id
+    update_chargebee_subscription_with_meta_data(cb_subscription_id, bc_store_hash, config=app.config)
+    app_user.cb_subscription_id = cb_subscription_id
 
-        app_user.save()
-        register_or_activate_bc_webhooks(app_user, app.config)
-    except KeyError:
-        return "User not logged in! Please go back and click on app icon in admin panel.", 401
+    app_user.save()
+    register_or_activate_bc_webhooks(app_user, app.config)
 
     app_id = app.config['APP_ID']
 
@@ -224,6 +225,19 @@ def reactivate_plan():
         register_or_activate_bc_webhooks(app_user, app.config)
 
     return redirect(url_for('index'))
+
+
+@app.route('/subscription-events', methods=['POST'])
+def subscription_cancelled():
+    data = json.loads(request.data)
+    subscription = data.get('content').get('subscription')
+    if subscription and subscription.get('status') == 'cancelled':
+        sub = get_chargebee_subscription_by_id(subscription['id'], config=app.config)
+        meta_data = sub.meta_data
+        bc_store_hash = meta_data['bc_store_hash']
+        app_user = get_query_first_result(AppUser, bc_store_hash)
+        deactivate_bc_webhooks(app_user, app.config)
+    return 'Ok'
 
 
 if __name__ == '__main__':

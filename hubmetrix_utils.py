@@ -1,14 +1,16 @@
+from contextlib import contextmanager
+from datetime import datetime
+
+import chargebee
+import pendulum
+import json
 from bigcommerce.api import BigcommerceApi
 from bigcommerce.exception import ClientRequestException
+from flask import url_for, render_template
+from werkzeug.exceptions import BadGateway
+
 from dynamodb_utils import *
 from hubspot_utils import *
-from datetime import datetime
-from pynamodb.exceptions import QueryError
-from werkzeug.exceptions import BadGateway
-from flask import url_for, render_template
-from contextlib import contextmanager
-import pendulum
-import chargebee
 
 
 @contextmanager
@@ -91,12 +93,9 @@ def check_and_provision_subscription(user, config):
         user.cb_subscription_id = sub.id
 
         if sub.status != 'cancelled':
-            if not user.bc_webhooks_registered:
-                register_or_activate_bc_webhooks(user, config)
-            user.save()
-        else:
-            deactivate_bc_webhooks(user, config)
-        return True
+            return register_or_activate_bc_webhooks(user, config)
+
+        return deactivate_bc_webhooks(user, config)
     return False
 
 
@@ -211,29 +210,37 @@ def reactivate_chargebee_subscription_by_id(subscription_id):
     return result.subscription
 
 
+@configure_chargebee_api
+def update_chargebee_subscription_with_meta_data(subscription_id, store_hash):
+    meta_data = json.dumps({'bc_store_hash': store_hash})
+    result = chargebee.Subscription.update(subscription_id, {'meta_data': meta_data})
+    return result.subscription
+
+
 def register_or_activate_bc_webhooks(user, config):
     client = get_bc_client(user, config)
 
-    try:
-        existing_webhooks = get_existing_webhooks(client)
-        if existing_webhooks:
-            for hook in existing_webhooks:
-                client.Webhooks.get(hook.id).update(is_active=True)
+    if not user.bc_webhooks_registered:
+        try:
+            existing_webhooks = get_existing_webhooks(client)
+            if existing_webhooks:
+                for hook in existing_webhooks:
+                    client.Webhooks.get(hook.id).update(is_active=True)
 
-        if not existing_webhooks:
-            order_dest = config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
-            customer_dest = config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
+            if not existing_webhooks:
+                order_dest = config['APP_BACKEND_URL'] + '/dev/bc-ingest-orders'
+                customer_dest = config['APP_BACKEND_URL'] + '/dev/bc-ingest-customers'
 
-            client.Webhooks.create(scope='store/order/created', destination=order_dest, is_active=True)
-            client.Webhooks.create(scope='store/order/statusUpdated', destination=order_dest, is_active=True)
-            client.Webhooks.create(scope='store/customer/updated', destination=customer_dest, is_active=True)
+                client.Webhooks.create(scope='store/order/created', destination=order_dest, is_active=True)
+                client.Webhooks.create(scope='store/order/statusUpdated', destination=order_dest, is_active=True)
+                client.Webhooks.create(scope='store/customer/updated', destination=customer_dest, is_active=True)
 
             user.bc_webhooks_registered = True
             user.save()
-    except BadGateway:
-        pass
-    finally:
-        user.save()
+            return True
+        except BadGateway:
+            return False
+    return True
 
 
 def deactivate_bc_webhooks(user, config):
@@ -246,8 +253,9 @@ def deactivate_bc_webhooks(user, config):
                 client.Webhooks.get(hook.id).update(is_active=False)
         user.bc_webhooks_registered = False
         user.save()
+        return True
     except BadGateway:
-        pass
+        return False
 
 
 def get_existing_webhooks(client):

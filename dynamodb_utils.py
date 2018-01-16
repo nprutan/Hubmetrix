@@ -1,7 +1,6 @@
+from pynamodb.attributes import UnicodeAttribute, NumberAttribute, ListAttribute, BooleanAttribute
 from pynamodb.exceptions import QueryError
 from pynamodb.models import Model
-from pynamodb.attributes import UnicodeAttribute, NumberAttribute, ListAttribute, BooleanAttribute, UTCDateTimeAttribute
-
 
 __all__ = ['AppUser', 'get_query_first_result', 'QueryError']
 
