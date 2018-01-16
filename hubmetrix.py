@@ -13,7 +13,7 @@ app.config['APP_URL'] = os.environ.get('APP_URL', 'http://localhost')
 app.config['APP_BACKEND_URL'] = os.environ.get('APP_BACKEND_URL', 'http://localhost/backend')
 app.config['BC_CLIENT_ID'] = os.environ.get('BC_CLIENT_ID', '')
 app.config['BC_CLIENT_SECRET'] = os.environ.get('BC_CLIENT_SECRET', '')
-app.config['SESSION_SECRET'] = os.getenv('SESSION_SECRET', os.urandom(64))
+app.config['SESSION_SECRET'] = os.environ.get('SESSION_SECRET')
 app.config['HS_REDIRECT_URI'] = os.environ.get('APP_URL', '') + app.config['STAGE-PREFIX'] + '/hsauth'
 app.config['HS_CLIENT_ID'] = os.environ.get('HS_CLIENT_ID', '')
 app.config['HS_CLIENT_SECRET'] = os.environ.get('HS_CLIENT_SECRET', '')
@@ -83,9 +83,6 @@ def load():
         session.permanent = True
         session['storehash'] = app_user.bc_store_hash
         session['storeuseremail'] = bc_email
-
-        if not app_user:
-            raise LookupError('No user found! Please reinstall app!')
 
         if not app_user.hs_access_token:
             return redirect(app.config['APP_URL'] + url_for('get_started'))

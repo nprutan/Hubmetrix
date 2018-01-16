@@ -8,6 +8,7 @@
         "s3_bucket": "zappa-63d2f3y6k",
 	    "slim_handler": true,
         "environment_variables": {
+            "SESSION_SECRET": "335e1ba54aea9fe117ca764c3cd96c06913da5c13c1ad9911ff99fb5c77474ad",
             "APP_URL": "https://9kr5377xjf.execute-api.us-west-1.amazonaws.com",
             "APP_BACKEND_URL": "https://up5sepzms9.execute-api.us-west-1.amazonaws.com",
             "BC_CLIENT_ID": "5sdgtpwp82lxz5elfh5c5e2uvjzd07g",
