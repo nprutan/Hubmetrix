@@ -80,15 +80,13 @@ def load():
         bc_store_hash, bc_email = payload_ctx
         app_user = get_query_first_result(AppUser, bc_store_hash)
 
+        session['storehash'] = bc_store_hash
         session.permanent = True
-        session['storehash'] = app_user.bc_store_hash
-        session['storeuseremail'] = bc_email
 
         if not app_user.hs_access_token:
             return redirect(app.config['APP_URL'] + url_for('get_started'))
 
         if check_and_provision_subscription(app_user, app.config):
-            session['cb_subscription_id'] = app_user.cb_subscription_id
             return redirect(app.config['APP_URL'] + url_for('index'))
 
         app_url = app.config['APP_URL']
@@ -140,9 +138,6 @@ def hs_auth_callback():
 
         with app_user_hubspot_token_manager(bc_store_hash, hubspot_auth_ctx) as app_user:
             if check_and_provision_subscription(app_user, app.config):
-                session['storehash'] = app_user.bc_store_hash
-                session['storeuseremail'] = app_user.bc_email
-                session['cb_subscription_id'] = app_user.cb_subscription_id
                 return redirect(app.config['APP_URL'] + url_for('index'))
 
             app_user.save()
