@@ -145,30 +145,66 @@ def construct_hubspot_auth_url(config):
     client_id = get_hs_client_id(config)
     redir_uri = get_hs_redir_uri(config)
 
-    return 'https://app.hubspot.com/oauth/authorize?client_id={}&scope=contacts%20automation%20timeline&redirect_uri={}'.format(
-        client_id, redir_uri)
+    return ('https://app.hubspot.com/oauth/authorize?client_id={}'
+            '&scope=contacts%20automation%20timeline&redirect_uri={}'.format(client_id, redir_uri))
 
 
 def configure_chargebee_api(func):
     def wrapper(*args, **kwargs):
         chargebee.configure(kwargs['config']['CHARGEBEE-API-KEY'], kwargs['config']['CHARGEBEE-SITE'])
         return func(*args)
+
     return wrapper
 
 
 @configure_chargebee_api
-def construct_chargebee_signup_url(email, app_url):
+def construct_chargebee_signup_url(store_info, app_url):
+    address_info = parse_bc_address(store_info['address'])
+
     result = chargebee.HostedPage.checkout_new({
         "subscription": {
             "plan_id": "hubmetrix-base-plan"
         },
         "customer": {
-            "email": email
+            "email": store_info['admin_email'],
+            "first_name": store_info['first_name'],
+            "last_name": store_info['last_name'],
+            "phone": store_info['phone']
+        },
+        "billing_address": {
+            "first_name": store_info['first_name'],
+            "last_name": store_info['last_name'],
+            "line1": address_info['line1'],
+            "city": address_info['city'],
+            "state": address_info['state'],
+            "zip": address_info['zip'],
+            "country": store_info['country_code']
         },
         "redirect_url": app_url + url_for('payment_success'),
         "embed": True
     })
     return result.hosted_page.values['id'], result.hosted_page.values['url']
+
+
+def parse_bc_address(address):
+    try:
+        if address and hasattr(address, 'split'):
+            addr = {}
+            addr_split = address.splitlines()
+            addr['line1'] = _safe_split(addr_split, 0)
+            addr['city'] = _safe_split(_safe_split(addr_split, 1).split(' '), 0).replace(',', '')
+            addr['state'] = _safe_split(_safe_split(addr_split, 1).split(' '), 1)
+            addr['zip'] = _safe_split(_safe_split(addr_split, 1).split(' '), 2)
+            return addr
+    except IndexError:
+        return dict(line1='', city='', state='', zip='')
+
+
+def _safe_split(str_to_split, idx):
+    try:
+        return str_to_split[idx]
+    except IndexError:
+        return ''
 
 
 def update_subscription_id(user, subscription_id):
@@ -284,5 +320,11 @@ def delete_all_webhooks(user, config):
 
 def get_bc_client(user, config):
     return BigcommerceApi(client_id=get_bc_client_id(config),
-                            store_hash=user.bc_store_hash,
-                            access_token=user.bc_access_token)
+                          store_hash=user.bc_store_hash,
+                          access_token=user.bc_access_token)
+
+
+def get_bc_store_info(user, config):
+    client = get_bc_client(user, config)
+
+    return client.Store.all()

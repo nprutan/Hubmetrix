@@ -1,4 +1,3 @@
-import json
 import os
 
 from flask import Flask, session, redirect, request, Response
@@ -91,7 +90,8 @@ def load():
 
         app_url = app.config['APP_URL']
         stage = app.config['STAGE-PREFIX']
-        signup_page_id, signup_page_url = construct_chargebee_signup_url(bc_email, app_url, config=app.config)
+        store_info = get_bc_store_info(app_user, app.config)
+        signup_page_id, signup_page_url = construct_chargebee_signup_url(store_info, app_url, config=app.config)
         session['hosted_page_id'] = signup_page_id
         return render_template('success_hubspot.html', chargebee_hosted_url=signup_page_url, app_url=app_url+stage+'/')
 
@@ -130,6 +130,11 @@ def uninstall():
     return Response('Deleted', status=204)
 
 
+@app.route('/bigcommerce/remove-user')
+def remove_user():
+    return Response('Deleted', status=204)
+
+
 @app.route('/hsauth')
 def hs_auth_callback():
     with hubspot_auth_manager(request.args, app.config) as hubspot_auth_ctx:
@@ -142,7 +147,8 @@ def hs_auth_callback():
 
             app_user.save()
             app_url = app.config['APP_URL']
-            signup_page_id, signup_page_url = (construct_chargebee_signup_url(app_user.bc_email, app_url,
+            store_info = get_bc_store_info(app_user, app.config)
+            signup_page_id, signup_page_url = (construct_chargebee_signup_url(store_info, app_url,
                                                                               config=app.config))
             session['hosted_page_id'] = signup_page_id
         return render_template('success_hubspot.html', chargebee_hosted_url=signup_page_url)
@@ -153,6 +159,7 @@ def payment_success():
     bc_store_hash = session['storehash']
     hosted_page_id = session['hosted_page_id']
     app_user = get_query_first_result(AppUser, bc_store_hash)
+    store_info = get_bc_store_info(app_user, app.config)
     cb_subscription = get_chargebee_hosted_page(hosted_page_id, config=app.config)
     cb_subscription_id = cb_subscription.content.subscription.id
     update_chargebee_subscription_with_meta_data(cb_subscription_id, bc_store_hash, config=app.config)
@@ -162,8 +169,9 @@ def payment_success():
     register_or_activate_bc_webhooks(app_user, app.config)
 
     app_id = app.config['APP_ID']
+    secure_url = store_info['secure_url']
 
-    redirect_url = 'https://store-{}.mybigcommerce.com/manage/app/{}'.format(app_user.bc_store_hash, app_id)
+    redirect_url = '{}/manage/app/{}'.format(secure_url, app_id)
     return redirect(redirect_url)
 
 
