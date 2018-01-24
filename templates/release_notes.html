@@ -37,12 +37,11 @@
     <div class="container">
       <div class="row">
         <div class="col-md-12 text-center">
-          <h1 class="">Hubmetrix Release Notes version 1.1.0</h1>
+          <h1 class="">Hubmetrix Release Notes version 1.1.2</h1>
           <p class="lead">These are the most recent notes for the latest release above.</p>
           <h1 class="text-secondary text-center"></h1>
           <div class="row">
             <div class="col-md-12 text-center">
-              <p class="lead">Hubmetrix 1.1.0 Release Notes </p>
               <h3 class="text-left">Timeline Integration: </h3>
               <p class="text-left">As of 1.1.0 we now have timeline integration! We will push new orders onto the customer's timeline with order date and order source. We will also update the timeline with order status information. Please be aware that due to the way that
                 timeline updates are handled, the order status may end up appearing chronologically before the order in the timeline. This behavior may be fixed in the future if it becomes too much of an issue.</p>
@@ -61,6 +60,9 @@
               <p class="text-left">We will update your contact’s lifecyclestage property to one of the following—‘customer’ for those that have the property “all_time_total_revenue greater” set to something greater than 0, and ‘lead’ for anything other than that. NOTE: HubSpot’s
                 lifecycle stage property is designed to move in a forward fashion only, unless explicitly set to blank first and then moved backward. We will not perform this operation. If your contact has a status greater than ‘lead’ and no revenue when
                 we attempt to set the property to ‘lead’, the property change will not succeed (although the other settings will go through) and the contact will be left with whatever lifecyclestage they had before the operation. </p>
+              <h3 class="text-left">Contact Sync Frequency: </h3>
+              <p class="text-left">Please note that contacting syncing will not happen all at once, or on a schedule. Hubmetrix is event driven, which means that contacts will sync when there is activity for that contact in BigCommerce. As mentioned above, there are some caveats,
+                but basically this means that when a customer has a new order or a change to their customer details, they will then be synced with HubSpot. </p>
               <p class="lead text-secondary text-left"></p>
             </div>
           </div>
