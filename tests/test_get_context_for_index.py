@@ -29,8 +29,32 @@ def test_get_context_for_index_returns_corect_tuple_item_types(ctx_for_idx):
     assert type(days_left) is str
 
 
+@pytest.mark.parametrize('chargebee_subscription_cancelled_at', [None])
+@pytest.mark.parametrize('chargebee_subscription_next_billing_at', [pendulum.now().add(days=30).int_timestamp])
+def test_get_context_for_index_returns_correct_days_left_for_active_sub_status_next_billing(app_user,
+                                                                                            chargebee_subscription):
+    subscription = chargebee_subscription.subscription
+    context_for_index = get_context_for_index(app_user, subscription)
+    next_charge, next_charge_explain, last_sync, days_left = context_for_index
+    period = pendulum.from_timestamp(pendulum.now().add(days=30).int_timestamp) - pendulum.now()
+
+    assert days_left == 'Days Left In Subscription: {}'.format(period.days)
+
+
 @pytest.mark.parametrize('chargebee_subscription_cancelled_at', [pendulum.now().add(days=10).int_timestamp])
-def test_get_context_for_index_returns_correct_context_for_sub_status_cancelled_at_future(app_user, chargebee_subscription):
+def test_get_context_for_index_returns_correct_days_left_for_sub_status_cancelled_at_future(app_user,
+                                                                                            chargebee_subscription):
+    subscription = chargebee_subscription.subscription
+    context_for_index = get_context_for_index(app_user, subscription)
+    next_charge, next_charge_explain, last_sync, days_left = context_for_index
+    period = pendulum.from_timestamp(pendulum.now().add(days=10).int_timestamp) - pendulum.now()
+
+    assert days_left == 'Days Left In Subscription: {}'.format(period.days)
+
+
+@pytest.mark.parametrize('chargebee_subscription_cancelled_at', [pendulum.now().add(days=10).int_timestamp])
+def test_get_context_for_index_returns_correct_next_charge_for_sub_status_cancelled_at_future(app_user,
+                                                                                              chargebee_subscription):
     subscription = chargebee_subscription.subscription
     context_for_index = get_context_for_index(app_user, subscription)
     next_charge, next_charge_explain, last_sync, days_left = context_for_index
@@ -39,7 +63,8 @@ def test_get_context_for_index_returns_correct_context_for_sub_status_cancelled_
 
 
 @pytest.mark.parametrize('chargebee_subscription_cancelled_at', [pendulum.now().int_timestamp])
-def test_get_context_for_index_returns_correct_context_for_sub_status_cancelled_at_now(app_user, chargebee_subscription):
+def test_get_context_for_index_returns_correct_next_charge_for_sub_status_cancelled_at_now(app_user,
+                                                                                           chargebee_subscription):
     subscription = chargebee_subscription.subscription
     context_for_index = get_context_for_index(app_user, subscription)
     next_charge, next_charge_explain, last_sync, days_left = context_for_index
