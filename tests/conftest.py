@@ -1,15 +1,22 @@
+import bigcommerce
+import chargebee
 import pendulum
 import pytest
-from dynamodb_utils import *
-import chargebee
 from chargebee.result import Result
 from pynamodb.models import Model
+from werkzeug.exceptions import BadGateway
 
+from dynamodb_utils import *
 from hubmetrix_utils import get_chargebee_subscription_by_id, get_context_for_index
 
 
 @pytest.fixture
-def app_user():
+def app_user_webhooks_registered():
+    return True
+
+
+@pytest.fixture
+def app_user(app_user_webhooks_registered):
     user = AppUser(bc_store_hash='3c0o779wl7', bc_id=415079)
     user.bc_access_token = 'kmnhtzyinaj6zhl0hynd8ic5jj8b8qf'
     user.bc_email = 'joediffy@example.com'
@@ -17,7 +24,7 @@ def app_user():
     user.bc_scope = ('store_cart_read_only store_v2_customers_login store_v2_customers_read_only store_v2_default'
                      ' store_v2_information_read_only store_v2_orders_read_only store_v2_products_read_only '
                      'store_v2_transactions_read_only users_basic_information')
-    user.bc_webhooks_registered = True
+    user.bc_webhooks_registered = app_user_webhooks_registered
     user.cb_subscription_id = 'C5OEsoLhbW9taJwc'
     user.hm_last_sync_timestamp = 'Thursday, 25-Jan-2018 20:51:37 GMT'
     user.hs_access_token = 'JIKW3IKTLBICUQEYwoP6ASCr5rICKM7GAzIZABGuvl9ltsl3r_cUU0cYLf1GeFqrKCVodZ'
@@ -203,12 +210,17 @@ def chargebee_subscription(chargebee_subscription_status, chargebee_subscription
 
 
 @pytest.fixture(autouse=True)
-def chargebee_subscription_auto(monkeypatch, chargebee_subscription):
+def chargebee_subscription_auto_retrieve(monkeypatch, chargebee_subscription):
     monkeypatch.setattr(chargebee.Subscription, 'retrieve', lambda x: chargebee_subscription)
 
 
 @pytest.fixture(autouse=True)
-def pynamodb_model_query_patch(monkeypatch, app_user):
+def chargebee_subscription_auto_list(monkeypatch, chargebee_subscription):
+    monkeypatch.setattr(chargebee.Subscription, 'list', lambda x: [chargebee_subscription] if x['email'] else [])
+
+
+@pytest.fixture(autouse=True)
+def pynamodb_model_query(monkeypatch, app_user):
     def get_user(user):
         if user != 'invalid':
             return [app_user]
@@ -217,7 +229,114 @@ def pynamodb_model_query_patch(monkeypatch, app_user):
     monkeypatch.setattr(Model, 'query', get_user)
 
 
+@pytest.fixture(autouse=True)
+def pynamodb_model_save(monkeypatch, app_user):
+    monkeypatch.setattr(Model, 'save', lambda x: app_user)
+
+
 @pytest.fixture
 def ctx_for_idx(app_user, app_config):
     subscription = get_chargebee_subscription_by_id(app_user.cb_subscription_id, config=app_config)
     return get_context_for_index(app_user, subscription)
+
+
+@pytest.fixture
+def bc_store_info():
+    return {'id': '2b0o559ql7', 'domain': 'composed-cloud10.mybigcommerce.com',
+     'secure_url': 'https://store-2b0o559ql7.mybigcommerce.com', 'status': 'prelaunch', 'name': 'Composed Cloud',
+     'first_name': 'Nathan', 'last_name': 'Rutan',
+     'address': '123 Easy St.\nHonolulu, HI 96822\nUnited States of America', 'country': 'United States',
+     'country_code': 'US', 'phone': '555-555-5555', 'admin_email': 'nprutan@gmail.com',
+     'order_email': 'info@composed-cloud10.mybigcommerce.com',
+     'favicon_url': 'https://cdn7.bigcommerce.com/r-fe9d5b0b14fc96661418eeb736c890d34aafc743/img/bc_favicon.ico',
+     'timezone': {'name': 'Europe/London', 'raw_offset': 0, 'dst_offset': 0, 'dst_correction': False,
+                  'date_format': {'display': 'M jS Y', 'export': 'M jS Y', 'extended_display': 'M jS Y @ g:i A'}},
+     'language': 'en', 'currency': 'USD', 'currency_symbol': '$', 'decimal_separator': '.', 'thousands_separator': ',',
+     'decimal_places': 2, 'currency_symbol_location': 'left', 'weight_units': 'Ounces', 'dimension_units': 'Inches',
+     'dimension_decimal_places': '2', 'dimension_decimal_token': '.', 'dimension_thousands_token': ',',
+     'plan_name': 'Partner Sandbox', 'plan_level': 'Free', 'industry': 'Other, something else', 'logo': [],
+     'is_price_entered_with_tax': False, 'active_comparison_modules': [],
+     'features': {'stencil_enabled': True, 'sitewidehttps_enabled': False, 'facebook_catalog_id': ''}}
+
+
+@pytest.fixture
+def bc_webhooks():
+    hooks = [{'id': 13223385, 'client_id': '5sdgtpwp82lxz5elfh5c5e2uvjzd07g',
+            'store_hash': '2b0o559ql7', 'scope': 'store/order/created',
+            'destination': 'https://up5sepzms9.execute-api.us-west-1.amazonaws.com/dev/bc-ingest-orders',
+            'headers': None, 'is_active': True, 'created_at': 1517004745, 'updated_at': 1517004745},
+            {'id': 13223386, 'client_id': '5sdgtpwp82lxz5elfh5c5e2uvjzd07g', 'store_hash': '2b0o559ql7',
+            'scope': 'store/order/statusUpdated',
+            'destination': 'https://up5sepzms9.execute-api.us-west-1.amazonaws.com/dev/bc-ingest-orders',
+            'headers': None, 'is_active': True, 'created_at': 1517004745, 'updated_at': 1517004745},
+            {'id': 13223387, 'client_id': '5sdgtpwp82lxz5elfh5c5e2uvjzd07g', 'store_hash': '2b0o559ql7',
+            'scope': 'store/customer/updated',
+            'destination': 'https://up5sepzms9.execute-api.us-west-1.amazonaws.com/dev/bc-ingest-customers',
+            'headers': None, 'is_active': True, 'created_at': 1517004745, 'updated_at': 1517004745}]
+    return [bigcommerce.resources.Webhooks(hook) for hook in hooks]
+
+
+@pytest.fixture
+def bc_webhooks_single_hook():
+    return bigcommerce.resources.Webhooks({'id': 13223385, 'client_id': '5sdgtpwp82lxz5elfh5c5e2uvjzd07g',
+            'store_hash': '2b0o559ql7', 'scope': 'store/order/created',
+            'destination': 'https://up5sepzms9.execute-api.us-west-1.amazonaws.com/dev/bc-ingest-orders',
+            'headers': None, 'is_active': True, 'created_at': 1517004745, 'updated_at': 1517004745})
+
+
+@pytest.fixture(autouse=True)
+def get_bc_store(monkeypatch, bc_store_info):
+    return monkeypatch.setattr(bigcommerce.resources.Store, 'all', lambda **kwargs: bc_store_info)
+
+
+@pytest.fixture
+def raise_bad_gateway_bool():
+    return False
+
+
+@pytest.fixture(autouse=True)
+def bc_webhooks_all(monkeypatch, bc_webhooks, raise_bad_gateway_bool):
+    def get_bc_webhooks(*args, **kwargs):
+        if raise_bad_gateway_bool:
+            raise BadGateway
+        return bc_webhooks
+    return monkeypatch.setattr(bigcommerce.resources.Webhooks, 'all', get_bc_webhooks)
+
+
+@pytest.fixture(autouse=True)
+def bc_webhook_get(monkeypatch, bc_webhooks_single_hook):
+    return monkeypatch.setattr(bigcommerce.resources.Webhooks, 'get', lambda x, **kwargs: bc_webhooks_single_hook)
+
+
+@pytest.fixture(autouse=True)
+def bc_webhook_update(monkeypatch, bc_webhooks_single_hook):
+    return monkeypatch.setattr(bigcommerce.resources.Webhooks, 'update',
+                               lambda *args, **wkargs: bc_webhooks_single_hook)
+
+
+@pytest.fixture(autouse=True)
+def bc_webhook_create(monkeypatch, bc_webhooks_single_hook):
+    return monkeypatch.setattr(bigcommerce.resources.Webhooks, 'create',
+                               lambda x, y, z, connection=None:
+                               bc_webhooks_single_hook)
+
+
+@pytest.fixture
+def chargebee_hosted_page():
+    return Result({"hosted_page": {
+        "id": "PKYW3j1UQAB6bzBWMcugfcZSGJpf2X5T7",
+        "type": "checkout_new",
+        "url": "https://yourapp.chargebee.com/pages/v2/PKYW3j1UQAB6bzBWMcugfcZSGJpf2X5T7/checkout",
+        "state": "created",
+        "embed": True,
+        "created_at": 1515494922,
+        "expires_at": 1515498522,
+        "object": "hosted_page",
+        "updated_at": 1515494922,
+        "resource_version": 1515494922000
+    }})
+
+
+@pytest.fixture(autouse=True)
+def chargebee_hosted_page_checkout_new(monkeypatch, chargebee_hosted_page):
+    return monkeypatch.setattr(chargebee.HostedPage, 'checkout_new', lambda x: chargebee_hosted_page)
