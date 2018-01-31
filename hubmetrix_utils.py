@@ -191,6 +191,11 @@ def parse_bc_address(address):
         if address and hasattr(address, 'split'):
             addr = {}
             addr_split = address.splitlines()
+            if len(addr_split) != 3:
+                if len(addr_split) == 4:
+                    addr_split.pop(0)
+                else:
+                    raise IndexError
             addr['line1'] = _safe_split(addr_split, 0)
             addr['city'] = _safe_split(_safe_split(addr_split, 1).split(' '), 0).replace(',', '')
             addr['state'] = _safe_split(_safe_split(addr_split, 1).split(' '), 1)
