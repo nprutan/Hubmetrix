@@ -16,8 +16,8 @@
             "HS_REDIRECT_URI": "https://9kr5377xjf.execute-api.us-west-1.amazonaws.com/dev/hsauth",
             "HS_CLIENT_ID": "f0e25e19-d1f3-48fe-93fc-59d744e2326e",
             "HS_CLIENT_SECRET": "74c80cfa-9bed-4770-8e31-a581df04a181",
-            "CHARGEBEE-API-KEY": "test_RqcuUOam2qv17jcusG0eiypcuZlaiQH7Zc",
-            "CHARGEBEE-SITE": "composedcloud-test",
+            "CHARGEBEE-API-KEY": "live_zwn5Fh3PP4zAAzlRjSXZ9ccd33rkvQ1QR",
+            "CHARGEBEE-SITE": "composedcloud",
             "STAGE-PREFIX": "/dev",
             "APP_ID": "11672"
         }
